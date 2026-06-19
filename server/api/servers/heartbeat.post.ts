@@ -35,10 +35,20 @@ export default defineEventHandler(async (event) => {
     return { licensed: false, policy: license.policy, expiresAt: license.expiresAt, message: `Key belongs to mod '${license.mod}', not '${data.mod}'` }
   }
 
+  // The game server can't know its own public IP — `data.ip` is its bind address (net_address),
+  // which is usually "0.0.0.0:27015" when HLDS is started without -ip. So derive the real IP from
+  // the request's source address (X-Forwarded-For first, since we run behind Vercel's proxy) and
+  // keep the game port the server reported in `data.ip` ("0.0.0.0:27015" -> port 27015).
+  const sourceIp = (getRequestIP(event, { xForwardedFor: true }) || '').replace(/^::ffff:/, '')
+  const portMatch = data.ip.match(/:(\d{1,5})$/)
+  const resolvedIp = sourceIp
+    ? (portMatch ? `${sourceIp}:${portMatch[1]}` : sourceIp)
+    : data.ip
+
   // Upsert telemetry (1 server = 1 key).
   const now = new Date()
   const telemetry = {
-    ip: data.ip,
+    ip: resolvedIp,
     hostname: data.hostname,
     map: data.map,
     players: data.players,
