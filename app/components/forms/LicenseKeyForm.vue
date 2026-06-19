@@ -4,8 +4,10 @@ import { CalendarDateTime } from '@internationalized/date'
 
 interface LicenseFormData {
   key?: string
+  mod: string
   description?: string
   status: 'active' | 'inactive'
+  policy: 'key' | 'time' | 'open'
   expiresAt?: string
 }
 
@@ -22,14 +24,18 @@ const emit = defineEmits<{
 
 const formData = ref<{
   key: string
+  mod: string
   description: string
   status: string
+  policy: string
   expiresAt?: DateValue
   time: string
 }>({
   key: '',
+  mod: MODS[0],
   description: '',
   status: 'active',
+  policy: 'key',
   expiresAt: undefined,
   time: '00:00:00',
 })
@@ -81,8 +87,10 @@ function handleSubmit() {
 
   const submitData = {
     key: formData.value.key || undefined,
+    mod: formData.value.mod,
     description: formData.value.description || undefined,
     status: formData.value.status as 'active' | 'inactive',
+    policy: formData.value.policy as 'key' | 'time' | 'open',
     expiresAt: expiresAtISO,
   }
 
@@ -100,8 +108,10 @@ function handleCancel() {
 function resetForm() {
   formData.value = {
     key: '',
+    mod: MODS[0],
     description: '',
     status: 'active',
+    policy: 'key',
     expiresAt: undefined,
     time: '00:00:00',
   }
@@ -121,6 +131,38 @@ function resetForm() {
         placeholder="XXXX-XXXX-XXXX-XXXX"
         class="border-orange-900/30 bg-neutral-800 text-neutral-100 placeholder:text-neutral-500"
       />
+    </div>
+
+    <div class="space-y-2">
+      <UiLabel for="mod" class="text-neutral-300">
+        Мод
+      </UiLabel>
+
+      <UiNativeSelect
+        id="mod"
+        v-model="formData.mod"
+        class="w-full border-orange-900/30 bg-neutral-800 text-neutral-100"
+      >
+        <UiNativeSelectOption v-for="m in MODS" :key="m" :value="m">
+          {{ m }}
+        </UiNativeSelectOption>
+      </UiNativeSelect>
+    </div>
+
+    <div class="space-y-2">
+      <UiLabel for="policy" class="text-neutral-300">
+        Политика
+      </UiLabel>
+
+      <UiNativeSelect
+        id="policy"
+        v-model="formData.policy"
+        class="w-full border-orange-900/30 bg-neutral-800 text-neutral-100"
+      >
+        <UiNativeSelectOption v-for="p in POLICIES" :key="p.value" :value="p.value">
+          {{ p.label }}
+        </UiNativeSelectOption>
+      </UiNativeSelect>
     </div>
 
     <div class="space-y-2">

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "tags": [
+    "-lintignore"
+  ],
+  "entry": [
+    "app/components/ui/**/*.{ts,vue}"
+  ],
+  "ignoreDependencies": [
+    "@vee-validate/zod",
+    "vue-router"
+  ]
+}

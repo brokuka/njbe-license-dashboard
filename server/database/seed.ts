@@ -1,8 +1,7 @@
 import process from 'node:process'
-import { hash } from '@node-rs/argon2'
-import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import { env } from '../../config/env'
+import { ensureAdminUser } from './admin'
 import * as schema from './schema/user'
 
 const db = drizzle({
@@ -11,31 +10,13 @@ const db = drizzle({
 })
 
 async function seed() {
-  // Проверяем, существует ли уже пользователь
-  const existingUser = await db.query.userTable.findFirst({
-    where: eq(schema.userTable.username, env.NUXT_ADMIN_USERNAME),
-  })
-
-  if (existingUser) {
-    return
-  }
-
-  // Хешируем пароль
-  const passwordHash = await hash(env.NUXT_ADMIN_PASSWORD, {
-    memoryCost: 19456,
-    timeCost: 2,
-    outputLen: 32,
-    parallelism: 1,
-  })
-
-  // Создаем администратора
-  await db.insert(schema.userTable).values({
+  const created = await ensureAdminUser(db, {
     username: env.NUXT_ADMIN_USERNAME,
+    password: env.NUXT_ADMIN_PASSWORD,
     email: env.NUXT_ADMIN_EMAIL,
-    role: 'admin',
-    age: 30,
-    passwordHash,
   })
+
+  console.warn(created ? '✅ Admin user created' : 'ℹ️  Admin user already exists')
 }
 
 seed()

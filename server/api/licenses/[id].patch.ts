@@ -3,8 +3,10 @@ import { z } from 'zod'
 
 const updateLicenseSchema = z.object({
   key: z.string().min(1).max(255).optional(),
+  mod: z.string().min(1).max(32).optional(),
   description: z.string().optional(),
   status: z.enum(['active', 'inactive']).optional(),
+  policy: z.enum(['key', 'time', 'open']).optional(),
   expiresAt: z.string().datetime().optional(),
 })
 
@@ -48,8 +50,10 @@ export default defineEventHandler(async (event) => {
   const [updatedLicense] = await db.update(licenseKeyTable)
     .set({
       ...(validated.key && { key: validated.key }),
+      ...(validated.mod && { mod: validated.mod }),
       ...(validated.description !== undefined && { description: validated.description }),
       ...(validated.status && { status: validated.status }),
+      ...(validated.policy && { policy: validated.policy }),
       ...(validated.expiresAt && { expiresAt: new Date(validated.expiresAt) }),
       updatedAt: new Date(),
     })
