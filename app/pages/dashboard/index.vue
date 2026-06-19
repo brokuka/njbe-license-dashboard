@@ -16,6 +16,8 @@ interface LicenseKey {
 interface ServerInfo {
   id: number
   ip: string | null
+  host: string | null
+  ipBanned: boolean
   hostname: string | null
   map: string | null
   players: number
@@ -338,6 +340,36 @@ async function handleExtendServer(server: ServerInfo) {
   }
   finally {
     extendingServerId.value = null
+  }
+}
+
+// Бан/разбан целого IP (все порты с этого адреса), независимо от ключа и политики.
+const banningIp = ref<string | null>(null)
+
+async function handleToggleIpBan(server: ServerInfo) {
+  if (!server.host)
+    return
+
+  banningIp.value = server.host
+
+  try {
+    if (server.ipBanned) {
+      await $fetch(`/api/banned-ips/${encodeURIComponent(server.host)}`, { method: 'DELETE' })
+      toast.add({ title: `IP ${server.host} разбанен`, color: 'success' })
+    }
+    else {
+      await $fetch('/api/banned-ips', { method: 'POST', body: { ip: server.host } })
+      toast.add({ title: `IP ${server.host} забанен`, color: 'success' })
+    }
+    await refreshNuxtData('servers')
+    lastRefresh.value = new Date()
+  }
+  catch (error) {
+    console.error('Failed to toggle IP ban:', error)
+    toast.add({ title: 'Не удалось изменить бан IP', color: 'error' })
+  }
+  finally {
+    banningIp.value = null
   }
 }
 
@@ -697,8 +729,25 @@ const serverColumns: TableColumn<ServerInfo>[] = [
                 :items="[...SERVER_OVERRIDES]"
                 size="sm"
                 class="w-40"
+                :disabled="row.original.ipBanned"
                 @update:model-value="v => handleChangeServerOverride(row.original, String(v))"
               />
+              <!-- Бан всего IP (все порты), независимо от per-server политики -->
+              <div v-if="row.original.host" class="flex items-center gap-1.5">
+                <UBadge v-if="row.original.ipBanned" color="error" variant="subtle" size="sm">
+                  IP забанен
+                </UBadge>
+                <UButton
+                  :color="row.original.ipBanned ? 'neutral' : 'error'"
+                  variant="ghost"
+                  size="xs"
+                  :icon="row.original.ipBanned ? 'i-lucide-shield-check' : 'i-lucide-ban'"
+                  :loading="banningIp === row.original.host"
+                  @click="handleToggleIpBan(row.original)"
+                >
+                  {{ row.original.ipBanned ? 'Разбанить IP' : 'Бан IP' }}
+                </UButton>
+              </div>
               <!-- Когда наследуется политика ключа — показываем какая именно -->
               <span
                 v-if="serverOverrideValue(row.original) === 'inherit'"

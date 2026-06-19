@@ -15,6 +15,13 @@
       "when": 1781905637225,
       "tag": "0001_brief_sinister_six",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781906830742,
+      "tag": "0002_lush_doorman",
+      "breakpoints": true
     }
   ]
 }

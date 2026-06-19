@@ -51,6 +51,7 @@ export default defineEventHandler(async (event) => {
   const now = new Date()
   const telemetry = {
     ip: resolvedIp,
+    host: sourceIp || null,
     hostname: data.hostname,
     map: data.map,
     players: data.players,
@@ -64,12 +65,19 @@ export default defineEventHandler(async (event) => {
     .onConflictDoUpdate({ target: [serverTable.licenseKeyId, serverTable.ip], set: telemetry })
     .returning()
 
+  // Whole-IP ban (port-independent) takes precedence over key/policy/per-server override.
+  const ipBan = sourceIp
+    ? await db.query.bannedIpTable.findFirst({
+        where: (bannedIpTable, { eq }) => eq(bannedIpTable.ip, sourceIp),
+      })
+    : undefined
+
   // Effective licensing: per-server override (if any) layered over the key's base policy.
   const effectivePolicy = server.policyOverride ?? license.policy
   const effectiveExpiresAt = server.overrideExpiresAt ?? license.expiresAt
 
   let licensed: boolean
-  if (server.blocked) {
+  if (ipBan || server.blocked) {
     licensed = false
   }
   else {
@@ -91,6 +99,6 @@ export default defineEventHandler(async (event) => {
     licensed,
     policy: effectivePolicy,
     expiresAt: effectiveExpiresAt,
-    message: '',
+    message: ipBan ? 'IP address is banned' : '',
   }
 })
