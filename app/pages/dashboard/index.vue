@@ -132,23 +132,40 @@ async function handleCreateLicense(formData: LicenseFormData) {
   }
 }
 
-async function handleDeleteLicense(id: number) {
-  // eslint-disable-next-line no-alert
-  if (!window.confirm('Вы уверены, что хотите удалить этот лицензионный ключ?')) {
+// Подтверждение удаления через модалку Nuxt UI.
+// licenseToDelete не обнуляем при закрытии, чтобы текст не пропадал во время анимации.
+const licenseToDelete = ref<LicenseKey | null>(null)
+const isDeleteDialogOpen = ref(false)
+const isDeleting = ref(false)
+
+function handleDeleteLicense(license: LicenseKey) {
+  licenseToDelete.value = license
+  isDeleteDialogOpen.value = true
+}
+
+async function confirmDeleteLicense() {
+  if (!licenseToDelete.value)
     return
-  }
+
+  isDeleting.value = true
 
   try {
-    await $fetch(`/api/licenses/${id}`, {
+    await $fetch(`/api/licenses/${licenseToDelete.value.id}`, {
       method: 'DELETE',
     })
 
     // Обновляем данные после удаления
     await refreshNuxtData('licenses')
     lastRefresh.value = new Date()
+
+    isDeleteDialogOpen.value = false
   }
   catch (error) {
     console.error('Failed to delete license:', error)
+    toast.add({ title: 'Не удалось удалить ключ', color: 'error' })
+  }
+  finally {
+    isDeleting.value = false
   }
 }
 
@@ -256,6 +273,29 @@ function policyLabel(policy: string | null) {
 // Сервер считается онлайн, если heartbeat был меньше 10 минут назад.
 function isServerOnline(lastSeenAt: Date | string) {
   return (Date.now() - new Date(lastSeenAt).getTime()) < 10 * 60 * 1000
+}
+
+// Копирование ключа в буфер обмена с временной индикацией.
+const toast = useToast()
+const copiedKey = ref<string | null>(null)
+
+async function copyKey(key: string | null) {
+  if (!key)
+    return
+
+  try {
+    await navigator.clipboard.writeText(key)
+    copiedKey.value = key
+    toast.add({ title: 'Ключ скопирован', color: 'success', icon: 'i-lucide-check' })
+    setTimeout(() => {
+      if (copiedKey.value === key)
+        copiedKey.value = null
+    }, 2000)
+  }
+  catch (error) {
+    console.error('Failed to copy key:', error)
+    toast.add({ title: 'Не удалось скопировать', color: 'error' })
+  }
 }
 
 const licenseColumns: TableColumn<LicenseKey>[] = [
@@ -399,7 +439,17 @@ const serverColumns: TableColumn<ServerInfo>[] = [
           </template>
 
           <template #key-cell="{ row }">
-            <span class="font-mono">{{ row.original.key }}</span>
+            <div class="flex items-center gap-1.5">
+              <span class="font-mono">{{ row.original.key }}</span>
+              <UButton
+                color="neutral"
+                variant="ghost"
+                size="xs"
+                :icon="copiedKey === row.original.key ? 'i-lucide-check' : 'i-lucide-copy'"
+                :aria-label="`Скопировать ключ ${row.original.key}`"
+                @click="copyKey(row.original.key)"
+              />
+            </div>
           </template>
 
           <template #mod-cell="{ row }">
@@ -460,7 +510,7 @@ const serverColumns: TableColumn<ServerInfo>[] = [
                 variant="ghost"
                 size="sm"
                 icon="i-lucide-trash-2"
-                @click="handleDeleteLicense(row.original.id)"
+                @click="handleDeleteLicense(row.original)"
               />
             </div>
           </template>
@@ -555,8 +605,19 @@ const serverColumns: TableColumn<ServerInfo>[] = [
           </template>
 
           <template #key-cell="{ row }">
-            <span class="font-mono">{{ row.original.key || '—' }}</span>
-            <span class="ml-1 text-xs text-dimmed">({{ policyLabel(row.original.policy) }})</span>
+            <div class="flex items-center gap-1.5">
+              <span class="font-mono">{{ row.original.key || '—' }}</span>
+              <UButton
+                v-if="row.original.key"
+                color="neutral"
+                variant="ghost"
+                size="xs"
+                :icon="copiedKey === row.original.key ? 'i-lucide-check' : 'i-lucide-copy'"
+                :aria-label="`Скопировать ключ ${row.original.key}`"
+                @click="copyKey(row.original.key)"
+              />
+              <span class="text-xs text-dimmed">({{ policyLabel(row.original.policy) }})</span>
+            </div>
           </template>
 
           <template #lastSeenAt-cell="{ row }">
@@ -564,6 +625,36 @@ const serverColumns: TableColumn<ServerInfo>[] = [
           </template>
         </UTable>
       </UCard>
+
+      <!-- Подтверждение удаления лицензии -->
+      <UModal
+        v-model:open="isDeleteDialogOpen"
+        title="Удалить лицензионный ключ?"
+        :description="licenseToDelete
+          ? `Ключ «${licenseToDelete.key}» будет удалён без возможности восстановления.`
+          : ''"
+      >
+        <template #footer>
+          <div class="flex w-full justify-end gap-2">
+            <UButton
+              color="neutral"
+              variant="outline"
+              :disabled="isDeleting"
+              @click="isDeleteDialogOpen = false"
+            >
+              Отмена
+            </UButton>
+            <UButton
+              color="error"
+              icon="i-lucide-trash-2"
+              :loading="isDeleting"
+              @click="confirmDeleteLicense"
+            >
+              Удалить
+            </UButton>
+          </div>
+        </template>
+      </UModal>
     </UContainer>
   </div>
 </template>
