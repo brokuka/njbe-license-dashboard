@@ -3,11 +3,7 @@
   "tags": [
     "-lintignore"
   ],
-  "entry": [
-    "app/components/ui/**/*.{ts,vue}"
-  ],
   "ignoreDependencies": [
-    "@vee-validate/zod",
-    "vue-router"
+    "@iconify-json/lucide"
   ]
 }

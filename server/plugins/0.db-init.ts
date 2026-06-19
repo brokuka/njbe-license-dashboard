@@ -1,4 +1,3 @@
-import { env } from '~~/config/env'
 import { ensureAdminUser } from '../database/admin'
 
 /**
@@ -10,11 +9,13 @@ import { ensureAdminUser } from '../database/admin'
  * здесь мы только досеживаем данные.
  */
 export default defineNitroPlugin(async () => {
+  const config = useRuntimeConfig()
+
   try {
     const created = await ensureAdminUser(useDB(), {
-      username: env.NUXT_ADMIN_USERNAME,
-      password: env.NUXT_ADMIN_PASSWORD,
-      email: env.NUXT_ADMIN_EMAIL,
+      username: config.adminUsername,
+      password: config.adminPassword,
+      email: config.adminEmail || undefined,
     })
 
     if (created)

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { TableColumn } from '@nuxt/ui'
+
 interface LicenseKey {
   id: number
   key: string
@@ -54,6 +56,25 @@ const { data: servers } = await useFetch<ServerInfo[]>('/api/servers', {
 
 // Фильтр по моду (сайт обслуживает несколько модов)
 const modFilter = ref<string>('all')
+
+const modItems: { label: string, value: string }[] = [
+  { label: 'Все моды', value: 'all' },
+  ...MODS.map(m => ({ label: m, value: m as string })),
+]
+
+// Состояние сортировки таблиц (TanStack SortingState)
+const licenseSorting = ref<{ id: string, desc: boolean }[]>([])
+const serverSorting = ref<{ id: string, desc: boolean }[]>([])
+
+// Иконка-индикатор сортировки для заголовка колонки.
+function sortIcon(column: { getIsSorted: () => 'asc' | 'desc' | false }) {
+  const dir = column.getIsSorted()
+  if (dir === 'asc')
+    return 'i-lucide-arrow-up'
+  if (dir === 'desc')
+    return 'i-lucide-arrow-down'
+  return 'i-lucide-arrow-up-down'
+}
 
 const filteredLicenses = computed(() => {
   if (!licenses.value)
@@ -166,6 +187,22 @@ function getEffectiveStatus(license: LicenseKey): 'active' | 'inactive' | 'expir
   return 'active'
 }
 
+function statusColor(status: 'active' | 'inactive' | 'expired') {
+  if (status === 'active')
+    return 'success'
+  if (status === 'expired')
+    return 'error'
+  return 'neutral'
+}
+
+function statusLabel(status: 'active' | 'inactive' | 'expired') {
+  if (status === 'active')
+    return 'Активен'
+  if (status === 'expired')
+    return 'Истёк'
+  return 'Неактивен'
+}
+
 // Продление лицензии
 const extendingLicenseId = ref<number | null>(null)
 
@@ -220,302 +257,313 @@ function policyLabel(policy: string | null) {
 function isServerOnline(lastSeenAt: Date | string) {
   return (Date.now() - new Date(lastSeenAt).getTime()) < 10 * 60 * 1000
 }
+
+const licenseColumns: TableColumn<LicenseKey>[] = [
+  { accessorKey: 'key', header: 'Ключ' },
+  { accessorKey: 'mod', header: 'Мод' },
+  { accessorKey: 'description', header: 'Описание' },
+  { id: 'status', header: 'Статус' },
+  { accessorKey: 'policy', header: 'Политика' },
+  { accessorKey: 'createdAt', header: 'Создан' },
+  { accessorKey: 'expiresAt', header: 'Истекает' },
+  { id: 'actions', header: '' },
+]
+
+const serverColumns: TableColumn<ServerInfo>[] = [
+  { id: 'server', header: 'Сервер' },
+  { accessorKey: 'mod', header: 'Мод' },
+  { accessorKey: 'map', header: 'Карта' },
+  { id: 'players', header: 'Игроки' },
+  { accessorKey: 'version', header: 'Версия' },
+  { accessorKey: 'key', header: 'Ключ' },
+  { accessorKey: 'lastSeenAt', header: 'Активность' },
+]
 </script>
 
 <template>
-  <div class="min-h-screen bg-linear-to-br from-neutral-950 via-neutral-900 to-orange-950/20">
-    <div class="container mx-auto px-4 py-8">
+  <div class="min-h-screen">
+    <UContainer class="py-8">
       <!-- Header -->
-      <div class="mb-8 flex items-center justify-between">
+      <div class="mb-8 flex items-center justify-between gap-4">
         <div>
-          <h1 class="mb-2 text-4xl font-bold text-orange-500">
+          <h1 class="text-3xl font-bold text-highlighted">
             CS 1.6 License Manager
           </h1>
-          <p class="text-neutral-400">
+          <p class="mt-1 text-muted">
             Управление лицензионными ключами сервера Counter-Strike 1.6
           </p>
         </div>
-        <UiButton variant="outline" @click="onLogout">
+
+        <UButton color="neutral" variant="outline" icon="i-lucide-log-out" @click="onLogout">
           Выход
-        </UiButton>
+        </UButton>
       </div>
 
-      <!-- Main Card -->
-      <UiCard class="border-orange-900/20 bg-neutral-900/50 backdrop-blur">
-        <UiCardHeader>
-          <div class="flex items-center justify-between">
+      <!-- Licenses -->
+      <UCard>
+        <template #header>
+          <div class="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <UiCardTitle class="text-2xl text-orange-400">
+              <h2 class="text-lg font-semibold text-highlighted">
                 Лицензионные ключи
-              </UiCardTitle>
-              <UiCardDescription class="text-neutral-400">
-                Показано ключей: {{ filteredLicenses.length }} из {{ licenses?.length ?? 0 }}
-                <span class="ml-2 text-xs text-neutral-500">
+              </h2>
+              <p class="text-sm text-muted">
+                Показано: {{ filteredLicenses.length }} из {{ licenses?.length ?? 0 }}
+                <span class="ml-1 text-xs text-dimmed">
                   • Обновлено: {{ lastRefresh.toLocaleTimeString('ru-RU') }}
                 </span>
-              </UiCardDescription>
+              </p>
             </div>
 
             <div class="flex items-center gap-2">
-              <UiNativeSelect
-                v-model="modFilter"
-                class="border-orange-900/30 bg-neutral-800 text-neutral-100"
+              <USelect v-model="modFilter" :items="modItems" class="w-40" />
+
+              <UModal
+                v-model:open="isDialogOpen"
+                title="Новый лицензионный ключ"
+                description="Оставьте поле ключа пустым для автогенерации"
               >
-                <UiNativeSelectOption value="all">
-                  Все моды
-                </UiNativeSelectOption>
-                <UiNativeSelectOption v-for="m in MODS" :key="m" :value="m">
-                  {{ m }}
-                </UiNativeSelectOption>
-              </UiNativeSelect>
+                <UButton icon="i-lucide-plus">
+                  Добавить ключ
+                </UButton>
 
-              <UiDialog v-model:open="isDialogOpen">
-              <UiDialogTrigger as-child>
-                <UiButton class="bg-orange-600 hover:bg-orange-700">
-                  <span class="mr-2">+</span> Добавить ключ
-                </UiButton>
-              </UiDialogTrigger>
-
-              <UiDialogContent class="border-orange-900/30 bg-neutral-900 sm:max-w-md">
-                <UiDialogHeader>
-                  <UiDialogTitle class="text-orange-400">
-                    Новый лицензионный ключ
-                  </UiDialogTitle>
-                  <UiDialogDescription class="text-neutral-400">
-                    Оставьте поле ключа пустым для автогенерации
-                  </UiDialogDescription>
-                </UiDialogHeader>
-
-                <FormsLicenseKeyForm
-                  :loading="isSubmitting"
-                  @submit="handleCreateLicense"
-                  @cancel="isDialogOpen = false"
-                />
-              </UiDialogContent>
-            </UiDialog>
+                <template #body>
+                  <FormsLicenseKeyForm
+                    :loading="isSubmitting"
+                    @submit="handleCreateLicense"
+                    @cancel="isDialogOpen = false"
+                  />
+                </template>
+              </UModal>
             </div>
           </div>
-        </UiCardHeader>
+        </template>
 
-        <UiCardContent>
-          <div v-if="filteredLicenses.length === 0" class="py-12 text-center">
-            <p class="mb-4 text-neutral-400">
-              Лицензионные ключи отсутствуют
-            </p>
-            <UiButton
-              class="bg-orange-600 hover:bg-orange-700"
-              @click="isDialogOpen = true"
+        <div v-if="filteredLicenses.length === 0" class="py-12 text-center">
+          <p class="mb-4 text-muted">
+            Лицензионные ключи отсутствуют
+          </p>
+          <UButton icon="i-lucide-plus" @click="isDialogOpen = true">
+            Добавить первый ключ
+          </UButton>
+        </div>
+
+        <UTable
+          v-else
+          v-model:sorting="licenseSorting"
+          :data="filteredLicenses"
+          :columns="licenseColumns"
+        >
+          <template #key-header="{ column }">
+            <UButton
+              variant="ghost"
+              color="neutral"
+              label="Ключ"
+              class="-mx-2.5"
+              :icon="sortIcon(column)"
+              @click="column.toggleSorting(column.getIsSorted() === 'asc')"
+            />
+          </template>
+
+          <template #mod-header="{ column }">
+            <UButton
+              variant="ghost"
+              color="neutral"
+              label="Мод"
+              class="-mx-2.5"
+              :icon="sortIcon(column)"
+              @click="column.toggleSorting(column.getIsSorted() === 'asc')"
+            />
+          </template>
+
+          <template #createdAt-header="{ column }">
+            <UButton
+              variant="ghost"
+              color="neutral"
+              label="Создан"
+              class="-mx-2.5"
+              :icon="sortIcon(column)"
+              @click="column.toggleSorting(column.getIsSorted() === 'asc')"
+            />
+          </template>
+
+          <template #expiresAt-header="{ column }">
+            <UButton
+              variant="ghost"
+              color="neutral"
+              label="Истекает"
+              class="-mx-2.5"
+              :icon="sortIcon(column)"
+              @click="column.toggleSorting(column.getIsSorted() === 'asc')"
+            />
+          </template>
+
+          <template #key-cell="{ row }">
+            <span class="font-mono">{{ row.original.key }}</span>
+          </template>
+
+          <template #mod-cell="{ row }">
+            <UBadge color="neutral" variant="subtle">
+              {{ row.original.mod }}
+            </UBadge>
+          </template>
+
+          <template #description-cell="{ row }">
+            {{ row.original.description || '—' }}
+          </template>
+
+          <template #status-cell="{ row }">
+            <UBadge :color="statusColor(getEffectiveStatus(row.original))" variant="subtle">
+              {{ statusLabel(getEffectiveStatus(row.original)) }}
+            </UBadge>
+          </template>
+
+          <template #policy-cell="{ row }">
+            <USelect
+              :model-value="row.original.policy"
+              :items="[...POLICIES]"
+              size="sm"
+              class="w-44"
+              @update:model-value="v => handleChangePolicy(row.original, String(v))"
+            />
+          </template>
+
+          <template #createdAt-cell="{ row }">
+            <span class="text-muted">{{ formatDate(row.original.createdAt) }}</span>
+          </template>
+
+          <template #expiresAt-cell="{ row }">
+            <span
+              v-if="row.original.expiresAt"
+              :class="isExpired(row.original.expiresAt) ? 'text-error' : 'text-muted'"
             >
-              Добавить первый ключ
-            </UiButton>
-          </div>
+              {{ formatDate(row.original.expiresAt) }}
+              <span v-if="isExpired(row.original.expiresAt)">(истёк)</span>
+            </span>
+            <span v-else class="text-dimmed">—</span>
+          </template>
 
-          <div v-else class="overflow-x-auto">
-            <UiTable>
-              <UiTableHeader>
-                <UiTableRow class="border-orange-900/20 hover:bg-orange-950/10">
-                  <UiTableHead class="text-orange-400">
-                    Ключ
-                  </UiTableHead>
-                  <UiTableHead class="text-orange-400">
-                    Мод
-                  </UiTableHead>
-                  <UiTableHead class="text-orange-400">
-                    Описание
-                  </UiTableHead>
-                  <UiTableHead class="text-orange-400">
-                    Статус
-                  </UiTableHead>
-                  <UiTableHead class="text-orange-400">
-                    Политика
-                  </UiTableHead>
-                  <UiTableHead class="text-orange-400">
-                    Создан
-                  </UiTableHead>
-                  <UiTableHead class="text-orange-400">
-                    Истекает
-                  </UiTableHead>
-                  <UiTableHead class="text-orange-400 text-right">
-                    Действия
-                  </UiTableHead>
-                </UiTableRow>
-              </UiTableHeader>
-
-              <UiTableBody>
-                <UiTableRow
-                  v-for="license in filteredLicenses"
-                  :key="license.id"
-                  class="border-orange-900/20 hover:bg-orange-950/10"
-                >
-                  <UiTableCell class="font-mono text-neutral-100">
-                    {{ license.key }}
-                  </UiTableCell>
-                  <UiTableCell>
-                    <UiBadge class="border-orange-800/30 bg-orange-950/30 text-orange-300">
-                      {{ license.mod }}
-                    </UiBadge>
-                  </UiTableCell>
-                  <UiTableCell class="text-neutral-300">
-                    {{ license.description || '—' }}
-                  </UiTableCell>
-                  <UiTableCell>
-                    <UiBadge
-                      :variant="getEffectiveStatus(license) === 'active' ? 'default' : 'secondary'"
-                      :class="{
-                        'bg-green-900/40 text-green-400 border-green-800/30': getEffectiveStatus(license) === 'active',
-                        'bg-red-900/40 text-red-400 border-red-800/30': getEffectiveStatus(license) === 'expired',
-                        'bg-neutral-800 text-neutral-400 border-neutral-700': getEffectiveStatus(license) === 'inactive',
-                      }"
-                    >
-                      {{ getEffectiveStatus(license) === 'active' ? 'Активен' : getEffectiveStatus(license) === 'expired' ? 'Истёк' : 'Неактивен' }}
-                    </UiBadge>
-                  </UiTableCell>
-                  <UiTableCell>
-                    <UiNativeSelect
-                      :model-value="license.policy"
-                      class="border-orange-900/30 bg-neutral-800 text-neutral-100"
-                      @update:model-value="v => handleChangePolicy(license, String(v))"
-                    >
-                      <UiNativeSelectOption v-for="p in POLICIES" :key="p.value" :value="p.value">
-                        {{ p.label }}
-                      </UiNativeSelectOption>
-                    </UiNativeSelect>
-                  </UiTableCell>
-                  <UiTableCell class="text-neutral-400">
-                    {{ formatDate(license.createdAt) }}
-                  </UiTableCell>
-                  <UiTableCell>
-                    <span
-                      v-if="license.expiresAt"
-                      :class="isExpired(license.expiresAt) ? 'text-red-400' : 'text-neutral-400'"
-                    >
-                      {{ formatDate(license.expiresAt) }}
-                      <span v-if="isExpired(license.expiresAt)" class="ml-1">
-                        (истёк)
-                      </span>
-                    </span>
-                    <span v-else class="text-neutral-500">
-                      —
-                    </span>
-                  </UiTableCell>
-                  <UiTableCell class="text-right">
-                    <div class="flex justify-end gap-2">
-                      <UiButton
-                        v-if="getEffectiveStatus(license) === 'expired'"
-                        variant="ghost"
-                        size="sm"
-                        class="text-orange-400 hover:bg-orange-950/20 hover:text-orange-300"
-                        :disabled="extendingLicenseId === license.id"
-                        @click="handleExtendLicense(license)"
-                      >
-                        {{ extendingLicenseId === license.id ? 'Продление...' : 'Продлить' }}
-                      </UiButton>
-                      <UiButton
-                        variant="ghost"
-                        size="sm"
-                        class="text-red-400 hover:bg-red-950/20 hover:text-red-300"
-                        @click="handleDeleteLicense(license.id)"
-                      >
-                        Удалить
-                      </UiButton>
-                    </div>
-                  </UiTableCell>
-                </UiTableRow>
-              </UiTableBody>
-            </UiTable>
-          </div>
-        </UiCardContent>
-      </UiCard>
+          <template #actions-cell="{ row }">
+            <div class="flex justify-end gap-1">
+              <UButton
+                v-if="getEffectiveStatus(row.original) === 'expired'"
+                color="primary"
+                variant="ghost"
+                size="sm"
+                :loading="extendingLicenseId === row.original.id"
+                @click="handleExtendLicense(row.original)"
+              >
+                Продлить
+              </UButton>
+              <UButton
+                color="error"
+                variant="ghost"
+                size="sm"
+                icon="i-lucide-trash-2"
+                @click="handleDeleteLicense(row.original.id)"
+              />
+            </div>
+          </template>
+        </UTable>
+      </UCard>
 
       <!-- Servers (live telemetry from heartbeat) -->
-      <UiCard class="mt-8 border-orange-900/20 bg-neutral-900/50 backdrop-blur">
-        <UiCardHeader>
-          <UiCardTitle class="text-2xl text-orange-400">
-            Серверы
-          </UiCardTitle>
-          <UiCardDescription class="text-neutral-400">
-            Онлайн-телеметрия (heartbeat). Всего: {{ servers?.length ?? 0 }}
-          </UiCardDescription>
-        </UiCardHeader>
-
-        <UiCardContent>
-          <div v-if="!servers || servers.length === 0" class="py-12 text-center text-neutral-400">
-            Серверы ещё не присылали heartbeat
+      <UCard class="mt-8">
+        <template #header>
+          <div>
+            <h2 class="text-lg font-semibold text-highlighted">
+              Серверы
+            </h2>
+            <p class="text-sm text-muted">
+              Онлайн-телеметрия (heartbeat). Всего: {{ servers?.length ?? 0 }}
+            </p>
           </div>
+        </template>
 
-          <div v-else class="overflow-x-auto">
-            <UiTable>
-              <UiTableHeader>
-                <UiTableRow class="border-orange-900/20 hover:bg-orange-950/10">
-                  <UiTableHead class="text-orange-400">
-                    Сервер
-                  </UiTableHead>
-                  <UiTableHead class="text-orange-400">
-                    Мод
-                  </UiTableHead>
-                  <UiTableHead class="text-orange-400">
-                    Карта
-                  </UiTableHead>
-                  <UiTableHead class="text-orange-400">
-                    Игроки
-                  </UiTableHead>
-                  <UiTableHead class="text-orange-400">
-                    Версия
-                  </UiTableHead>
-                  <UiTableHead class="text-orange-400">
-                    Ключ
-                  </UiTableHead>
-                  <UiTableHead class="text-orange-400">
-                    Активность
-                  </UiTableHead>
-                </UiTableRow>
-              </UiTableHeader>
+        <div v-if="!servers || servers.length === 0" class="py-12 text-center text-muted">
+          Серверы ещё не присылали heartbeat
+        </div>
 
-              <UiTableBody>
-                <UiTableRow
-                  v-for="server in servers"
-                  :key="server.id"
-                  class="border-orange-900/20 hover:bg-orange-950/10"
-                >
-                  <UiTableCell class="text-neutral-100">
-                    <div class="flex items-center gap-2">
-                      <span
-                        class="inline-block size-2 rounded-full"
-                        :class="isServerOnline(server.lastSeenAt) ? 'bg-green-500' : 'bg-neutral-600'"
-                      />
-                      <div class="flex flex-col">
-                        <span>{{ server.hostname || '—' }}</span>
-                        <span class="font-mono text-xs text-neutral-500">{{ server.ip || '—' }}</span>
-                      </div>
-                    </div>
-                  </UiTableCell>
-                  <UiTableCell>
-                    <UiBadge class="border-orange-800/30 bg-orange-950/30 text-orange-300">
-                      {{ server.mod || '—' }}
-                    </UiBadge>
-                  </UiTableCell>
-                  <UiTableCell class="text-neutral-300">
-                    {{ server.map || '—' }}
-                  </UiTableCell>
-                  <UiTableCell class="text-neutral-300">
-                    {{ server.players }} / {{ server.maxplayers }}
-                  </UiTableCell>
-                  <UiTableCell class="text-neutral-400">
-                    {{ server.version || '—' }}
-                  </UiTableCell>
-                  <UiTableCell class="font-mono text-neutral-300">
-                    {{ server.key || '—' }}
-                    <span class="ml-1 text-xs text-neutral-500">({{ policyLabel(server.policy) }})</span>
-                  </UiTableCell>
-                  <UiTableCell class="text-neutral-400">
-                    {{ formatDate(server.lastSeenAt) }}
-                  </UiTableCell>
-                </UiTableRow>
-              </UiTableBody>
-            </UiTable>
-          </div>
-        </UiCardContent>
-      </UiCard>
-    </div>
+        <UTable
+          v-else
+          v-model:sorting="serverSorting"
+          :data="servers"
+          :columns="serverColumns"
+        >
+          <template #mod-header="{ column }">
+            <UButton
+              variant="ghost"
+              color="neutral"
+              label="Мод"
+              class="-mx-2.5"
+              :icon="sortIcon(column)"
+              @click="column.toggleSorting(column.getIsSorted() === 'asc')"
+            />
+          </template>
+
+          <template #key-header="{ column }">
+            <UButton
+              variant="ghost"
+              color="neutral"
+              label="Ключ"
+              class="-mx-2.5"
+              :icon="sortIcon(column)"
+              @click="column.toggleSorting(column.getIsSorted() === 'asc')"
+            />
+          </template>
+
+          <template #lastSeenAt-header="{ column }">
+            <UButton
+              variant="ghost"
+              color="neutral"
+              label="Активность"
+              class="-mx-2.5"
+              :icon="sortIcon(column)"
+              @click="column.toggleSorting(column.getIsSorted() === 'asc')"
+            />
+          </template>
+
+          <template #server-cell="{ row }">
+            <div class="flex items-center gap-2">
+              <span
+                class="inline-block size-2 rounded-full"
+                :class="isServerOnline(row.original.lastSeenAt) ? 'bg-green-500' : 'bg-neutral-500'"
+              />
+              <div class="flex flex-col">
+                <span class="text-highlighted">{{ row.original.hostname || '—' }}</span>
+                <span class="font-mono text-xs text-dimmed">{{ row.original.ip || '—' }}</span>
+              </div>
+            </div>
+          </template>
+
+          <template #mod-cell="{ row }">
+            <UBadge color="neutral" variant="subtle">
+              {{ row.original.mod || '—' }}
+            </UBadge>
+          </template>
+
+          <template #map-cell="{ row }">
+            {{ row.original.map || '—' }}
+          </template>
+
+          <template #players-cell="{ row }">
+            {{ row.original.players }} / {{ row.original.maxplayers }}
+          </template>
+
+          <template #version-cell="{ row }">
+            <span class="text-muted">{{ row.original.version || '—' }}</span>
+          </template>
+
+          <template #key-cell="{ row }">
+            <span class="font-mono">{{ row.original.key || '—' }}</span>
+            <span class="ml-1 text-xs text-dimmed">({{ policyLabel(row.original.policy) }})</span>
+          </template>
+
+          <template #lastSeenAt-cell="{ row }">
+            <span class="text-muted">{{ formatDate(row.original.lastSeenAt) }}</span>
+          </template>
+        </UTable>
+      </UCard>
+    </UContainer>
   </div>
 </template>

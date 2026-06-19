@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { DateValue } from '@internationalized/date'
-import { CalendarDateTime } from '@internationalized/date'
+import { CalendarDateTime, DateFormatter, getLocalTimeZone } from '@internationalized/date'
 
 interface LicenseFormData {
   key?: string
@@ -21,6 +21,17 @@ const emit = defineEmits<{
   submit: [data: LicenseFormData]
   cancel: []
 }>()
+
+const df = new DateFormatter('ru-RU', { dateStyle: 'long' })
+
+const statusItems = [
+  { label: 'Активен', value: 'active' },
+  { label: 'Неактивен', value: 'inactive' },
+]
+
+// Widen to plain strings — formData хранит значения как string.
+const modOptions: string[] = [...MODS]
+const policyOptions = POLICIES.map(p => ({ label: p.label, value: p.value as string }))
 
 const formData = ref<{
   key: string
@@ -70,8 +81,7 @@ function handleSubmit() {
       dateWithTime = dateWithTime.set({ hour: hours, minute: minutes, second: seconds })
     }
 
-    // Создаём Date объект с учётом Georgia timezone (GMT+4)
-    // Пользователь вводит локальное время, которое нужно сохранить как UTC
+    // Создаём Date объект с учётом локального времени пользователя
     const localDate = new Date(
       dateWithTime.year,
       dateWithTime.month - 1, // JavaScript месяцы 0-indexed
@@ -119,132 +129,88 @@ function resetForm() {
 </script>
 
 <template>
-  <div class="space-y-4 py-4">
-    <div class="space-y-2">
-      <UiLabel for="key" class="text-neutral-300">
-        Ключ (опционально)
-      </UiLabel>
-
-      <UiInput
-        id="key"
+  <form class="space-y-4" @submit.prevent="handleSubmit">
+    <UFormField label="Ключ (опционально)" name="key">
+      <UInput
         v-model="formData.key"
         placeholder="XXXX-XXXX-XXXX-XXXX"
-        class="border-orange-900/30 bg-neutral-800 text-neutral-100 placeholder:text-neutral-500"
+        class="w-full"
       />
-    </div>
+    </UFormField>
 
-    <div class="space-y-2">
-      <UiLabel for="mod" class="text-neutral-300">
-        Мод
-      </UiLabel>
+    <UFormField label="Мод" name="mod">
+      <USelect v-model="formData.mod" :items="modOptions" class="w-full" />
+    </UFormField>
 
-      <UiNativeSelect
-        id="mod"
-        v-model="formData.mod"
-        class="w-full border-orange-900/30 bg-neutral-800 text-neutral-100"
-      >
-        <UiNativeSelectOption v-for="m in MODS" :key="m" :value="m">
-          {{ m }}
-        </UiNativeSelectOption>
-      </UiNativeSelect>
-    </div>
+    <UFormField label="Политика" name="policy">
+      <USelect v-model="formData.policy" :items="policyOptions" class="w-full" />
+    </UFormField>
 
-    <div class="space-y-2">
-      <UiLabel for="policy" class="text-neutral-300">
-        Политика
-      </UiLabel>
-
-      <UiNativeSelect
-        id="policy"
-        v-model="formData.policy"
-        class="w-full border-orange-900/30 bg-neutral-800 text-neutral-100"
-      >
-        <UiNativeSelectOption v-for="p in POLICIES" :key="p.value" :value="p.value">
-          {{ p.label }}
-        </UiNativeSelectOption>
-      </UiNativeSelect>
-    </div>
-
-    <div class="space-y-2">
-      <UiLabel for="description" class="text-neutral-300">
-        Описание
-      </UiLabel>
-
-      <UiInput
-        id="description"
+    <UFormField label="Описание" name="description">
+      <UInput
         v-model="formData.description"
         placeholder="Описание ключа..."
-        class="border-orange-900/30 bg-neutral-800 text-neutral-100 placeholder:text-neutral-500"
+        class="w-full"
       />
-    </div>
+    </UFormField>
 
     <div class="flex gap-2">
-      <div class="flex flex-col gap-3 flex-1">
-        <UiLabel for="expiresAt" class="text-neutral-300">
-          Date
-        </UiLabel>
+      <UFormField label="Дата" name="expiresAt" class="flex-1">
+        <UPopover>
+          <UButton
+            color="neutral"
+            variant="outline"
+            icon="i-lucide-calendar"
+            class="w-full justify-start font-normal"
+          >
+            {{ formData.expiresAt ? df.format(formData.expiresAt.toDate(getLocalTimeZone())) : 'Выберите дату' }}
+          </UButton>
 
-        <UiDatePicker id="expiresAt" v-model="formData.expiresAt" />
-      </div>
+          <template #content>
+            <!-- @vue-expect-error UCalendar/@internationalized/date type identity quirk (runtime OK) -->
+            <UCalendar
+              v-model="formData.expiresAt"
+              :range="false"
+              :multiple="false"
+              class="p-2"
+            />
+          </template>
+        </UPopover>
+      </UFormField>
 
-      <div class="flex flex-col gap-3">
-        <UiLabel for="time-picker" class="px-1 text-neutral-300">
-          Time
-        </UiLabel>
-
-        <UiInput
-          id="time-picker"
+      <UFormField label="Время" name="time">
+        <UInput
           v-model="formData.time"
           type="time"
-          step="1"
-          class="border-orange-900/30 bg-neutral-800 text-neutral-100 placeholder:text-neutral-500 appearance-none [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
+          :step="1"
         />
-      </div>
+      </UFormField>
     </div>
 
-    <div class="space-y-2">
-      <UiLabel class="text-neutral-300">
-        Статус
-      </UiLabel>
+    <UFormField label="Статус" name="status">
+      <URadioGroup
+        v-model="formData.status"
+        :items="statusItems"
+        orientation="horizontal"
+      />
+    </UFormField>
 
-      <div class="flex gap-4">
-        <UiRadioGroup v-model="formData.status" default-value="active">
-          <div class="flex items-center space-x-2">
-            <UiRadioGroupItem id="r1" value="active" />
-            <UiLabel class="text-neutral-300" for="r1">
-              Активен
-            </UiLabel>
-          </div>
-
-          <div class="flex items-center space-x-2">
-            <UiRadioGroupItem id="r2" value="inactive" />
-
-            <UiLabel class="text-neutral-300" for="r2">
-              Неактивен
-            </UiLabel>
-          </div>
-        </UiRadioGroup>
-      </div>
-    </div>
-
-    <div class="flex justify-end gap-2 pt-4">
-      <UiButton
+    <div class="flex justify-end gap-2 pt-2">
+      <UButton
         type="button"
-        variant="secondary"
+        color="neutral"
+        variant="ghost"
         @click="handleCancel"
       >
         Отмена
-      </UiButton>
+      </UButton>
 
-      <UiButton
+      <UButton
         type="submit"
-        class="bg-orange-600 hover:bg-orange-700"
-        :disabled="loading"
-        @click="handleSubmit"
+        :loading="loading"
       >
-        <UiSpinner v-if="loading" class="animate-spin" />
         Создать
-      </UiButton>
+      </UButton>
     </div>
-  </div>
+  </form>
 </template>

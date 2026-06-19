@@ -1,19 +1,19 @@
 import process from 'node:process'
 import { drizzle } from 'drizzle-orm/postgres-js'
-import { env } from '../../config/env'
 import { ensureAdminUser } from './admin'
 import * as schema from './schema/user'
 
+// Standalone-скрипт (`bun run db:seed`) — bun сам подгружает .env в process.env.
 const db = drizzle({
-  connection: env.NUXT_DATABASE_URL,
+  connection: process.env.NUXT_DATABASE_URL!,
   schema,
 })
 
 async function seed() {
   const created = await ensureAdminUser(db, {
-    username: env.NUXT_ADMIN_USERNAME,
-    password: env.NUXT_ADMIN_PASSWORD,
-    email: env.NUXT_ADMIN_EMAIL,
+    username: process.env.NUXT_ADMIN_USERNAME!,
+    password: process.env.NUXT_ADMIN_PASSWORD!,
+    email: process.env.NUXT_ADMIN_EMAIL,
   })
 
   console.warn(created ? '✅ Admin user created' : 'ℹ️  Admin user already exists')

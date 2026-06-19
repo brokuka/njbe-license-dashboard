@@ -1,8 +1,9 @@
 <script setup lang="ts">
+import type { FormSubmitEvent } from '@nuxt/ui'
 import { motion } from 'motion-v'
 import { z } from 'zod'
 
-const formSchema = z.object({
+const schema = z.object({
   login: z.string({ error: 'Required' }).min(1, 'Required').refine(
     (value) => {
       if (value.includes('@')) {
@@ -16,78 +17,68 @@ const formSchema = z.object({
   password: z.string().min(1, 'Required'),
 })
 
-const { handleSubmit } = useForm({
-  validationSchema: toTypedSchema(formSchema),
+type Schema = z.output<typeof schema>
+
+const state = reactive<Partial<Schema>>({
+  login: '',
+  password: '',
 })
 
-const { fetch } = useUserSession()
+const { fetch: fetchSession } = useUserSession()
 
 const responseErrorMessage = ref<string>('')
 
-const onSubmit = handleSubmit(async (data) => {
+async function onSubmit(event: FormSubmitEvent<Schema>) {
+  responseErrorMessage.value = ''
+
   const res = await $fetch('/api/sign-in', {
     method: 'POST',
-    body: data,
+    body: event.data,
     onResponseError: (err) => {
       responseErrorMessage.value = err.response._data.message as string
     },
   })
 
   if (res.status) {
-    fetch().then(async () => await navigateTo('/dashboard'))
+    await fetchSession()
+    await navigateTo('/dashboard')
   }
-})
-
-const formElements = [
-  {
-    name: 'login',
-    label: 'Login',
-    type: 'text',
-    placeholder: 'Login..',
-  },
-  {
-    name: 'password',
-    label: 'Password',
-    type: 'password',
-    placeholder: '********',
-  },
-]
+}
 </script>
 
 <template>
-  <div class="grid place-items-center h-screen">
-    <motion.form
-      class="w-75 flex flex-col gap-4"
+  <div class="grid h-screen place-items-center">
+    <motion.div
       :initial="{ opacity: 0, scale: 0.5 }"
-      :animate="{ opacity: 1, scale: 1 }" :transition="{
+      :animate="{ opacity: 1, scale: 1 }"
+      :transition="{
         duration: 0.8,
         delay: 0.5,
         ease: [0, 0.71, 0.2, 1.01],
       }"
-      @submit="onSubmit"
     >
-      <VeeField v-for="element in formElements" :key="element.name" v-slot="{ field, errors }" :name="element.name">
-        <UiField :data-invalid="!!errors.length">
-          <UiFieldLabel :for="element.name">
-            {{ element.label }}
-          </UiFieldLabel>
+      <UForm
+        :schema="schema"
+        :state="state"
+        class="flex w-75 flex-col gap-4"
+        @submit="onSubmit"
+      >
+        <UFormField label="Login" name="login">
+          <UInput v-model="state.login" placeholder="Login.." class="w-full" />
+        </UFormField>
 
-          <UiInput
-            :id="element.name" :type="element.type" :placeholder="element.placeholder" v-bind="field"
-            :aria-invalid="!!errors.length"
-          />
+        <UFormField label="Password" name="password">
+          <UInput v-model="state.password" type="password" placeholder="********" class="w-full" />
+        </UFormField>
 
-          <UiFieldError v-if="errors.length" :errors="errors" />
-        </UiField>
-      </VeeField>
+        <p v-if="responseErrorMessage" class="text-sm text-error">
+          {{ responseErrorMessage }}
+        </p>
 
-      <span v-if="responseErrorMessage" class="text-destructive">
-        {{ responseErrorMessage }}
-      </span>
-
-      <UiButton type="submit">
-        Login
-      </UiButton>
-    </motion.form>
+        <UButton type="submit" block>
+          Login
+        </UButton>
+      </UForm>
+    </motion.div>
   </div>
 </template>
