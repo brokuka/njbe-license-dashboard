@@ -21,6 +21,9 @@ interface ServerInfo {
   players: number
   maxplayers: number
   version: string | null
+  blocked: boolean
+  policyOverride: 'key' | 'time' | 'open' | null
+  overrideExpiresAt: Date | string | null
   lastSeenAt: Date | string
   key: string | null
   mod: string | null
@@ -43,6 +46,7 @@ definePageMeta({
 })
 
 const { clear, fetch: fetchUser } = useUserSession()
+const toast = useToast()
 
 // SSR загрузка лицензий
 const { data: licenses } = await useFetch<LicenseKey[]>('/api/licenses', {
@@ -270,13 +274,79 @@ function policyLabel(policy: string | null) {
   return POLICIES.find(p => p.value === policy)?.label ?? policy ?? '—'
 }
 
+// Per-server override: глобальная политика ключа, но конкретному серверу можно поставить
+// бан / временный доступ / другую политику, не трогая сам ключ.
+const SERVER_OVERRIDES = [
+  { value: 'inherit', label: 'Как у ключа' },
+  { value: 'ban', label: '🚫 Бан' },
+  { value: 'key', label: 'По ключу' },
+  { value: 'time', label: 'По времени' },
+  { value: 'open', label: 'Открыто' },
+] as const
+
+// Текущее значение селекта override для строки сервера.
+function serverOverrideValue(server: ServerInfo): string {
+  if (server.blocked)
+    return 'ban'
+  return server.policyOverride ?? 'inherit'
+}
+
+async function patchServer(id: number, body: Record<string, unknown>) {
+  await $fetch(`/api/servers/${id}`, { method: 'PATCH', body })
+  await refreshNuxtData('servers')
+  lastRefresh.value = new Date()
+}
+
+async function handleChangeServerOverride(server: ServerInfo, value: string) {
+  try {
+    if (value === 'inherit') {
+      await patchServer(server.id, { blocked: false, policyOverride: null, overrideExpiresAt: null })
+    }
+    else if (value === 'ban') {
+      await patchServer(server.id, { blocked: true })
+    }
+    else if (value === 'time') {
+      // Временный доступ: по умолчанию на 30 дней от текущей даты.
+      const expiry = new Date()
+      expiry.setDate(expiry.getDate() + 30)
+      await patchServer(server.id, { blocked: false, policyOverride: 'time', overrideExpiresAt: expiry.toISOString() })
+    }
+    else {
+      await patchServer(server.id, { blocked: false, policyOverride: value })
+    }
+  }
+  catch (error) {
+    console.error('Failed to change server override:', error)
+    toast.add({ title: 'Не удалось изменить доступ сервера', color: 'error' })
+  }
+}
+
+// Продление временного доступа сервера на 30 дней.
+const extendingServerId = ref<number | null>(null)
+
+async function handleExtendServer(server: ServerInfo) {
+  extendingServerId.value = server.id
+
+  try {
+    const expiry = new Date()
+    expiry.setDate(expiry.getDate() + 30)
+    await patchServer(server.id, { blocked: false, policyOverride: 'time', overrideExpiresAt: expiry.toISOString() })
+  }
+  catch (error) {
+    console.error('Failed to extend server access:', error)
+    toast.add({ title: 'Не удалось продлить доступ', color: 'error' })
+  }
+  finally {
+    extendingServerId.value = null
+  }
+}
+
 // Сервер считается онлайн, если heartbeat был меньше 10 минут назад.
 function isServerOnline(lastSeenAt: Date | string) {
   return (Date.now() - new Date(lastSeenAt).getTime()) < 10 * 60 * 1000
 }
 
 // Копирование ключа в буфер обмена с временной индикацией.
-const toast = useToast()
 const copiedKey = ref<string | null>(null)
 
 async function copyKey(key: string | null) {
@@ -316,6 +386,7 @@ const serverColumns: TableColumn<ServerInfo>[] = [
   { id: 'players', header: 'Игроки' },
   { accessorKey: 'version', header: 'Версия' },
   { accessorKey: 'key', header: 'Ключ' },
+  { id: 'override', header: 'Доступ' },
   { accessorKey: 'lastSeenAt', header: 'Активность' },
 ]
 </script>
@@ -616,7 +687,44 @@ const serverColumns: TableColumn<ServerInfo>[] = [
                 :aria-label="`Скопировать ключ ${row.original.key}`"
                 @click="copyKey(row.original.key)"
               />
-              <span class="text-xs text-dimmed">({{ policyLabel(row.original.policy) }})</span>
+            </div>
+          </template>
+
+          <template #override-cell="{ row }">
+            <div class="flex flex-col gap-1">
+              <USelect
+                :model-value="serverOverrideValue(row.original)"
+                :items="[...SERVER_OVERRIDES]"
+                size="sm"
+                class="w-40"
+                @update:model-value="v => handleChangeServerOverride(row.original, String(v))"
+              />
+              <!-- Когда наследуется политика ключа — показываем какая именно -->
+              <span
+                v-if="serverOverrideValue(row.original) === 'inherit'"
+                class="text-xs text-dimmed"
+              >
+                ({{ policyLabel(row.original.policy) }})
+              </span>
+              <!-- Срок временного доступа + быстрое продление -->
+              <div
+                v-if="serverOverrideValue(row.original) === 'time'"
+                class="flex items-center gap-1.5 text-xs"
+              >
+                <span :class="isExpired(row.original.overrideExpiresAt) ? 'text-error' : 'text-dimmed'">
+                  до {{ formatDate(row.original.overrideExpiresAt) }}
+                  <template v-if="isExpired(row.original.overrideExpiresAt)">(истёк)</template>
+                </span>
+                <UButton
+                  color="primary"
+                  variant="ghost"
+                  size="xs"
+                  :loading="extendingServerId === row.original.id"
+                  @click="handleExtendServer(row.original)"
+                >
+                  +30д
+                </UButton>
+              </div>
             </div>
           </template>
 

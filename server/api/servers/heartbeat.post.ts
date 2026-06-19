@@ -18,7 +18,7 @@ export default defineEventHandler(async (event) => {
   const data = heartbeatSchema.parse(body)
 
   const db = useDB()
-  const { licenseKeyTable, serverTable } = tables
+  const { serverTable } = tables
 
   const license = await db.query.licenseKeyTable.findFirst({
     where: (licenseKeyTable, { eq }) => eq(licenseKeyTable.key, data.key),
@@ -45,7 +45,9 @@ export default defineEventHandler(async (event) => {
     ? (portMatch ? `${sourceIp}:${portMatch[1]}` : sourceIp)
     : data.ip
 
-  // Upsert telemetry (1 server = 1 key).
+  // Upsert telemetry. One key may be shared across many servers, so the row is identified by
+  // (licenseKeyId, ip). The `set` only touches telemetry fields, so admin-controlled overrides
+  // (blocked / policyOverride / overrideExpiresAt) persist across beats.
   const now = new Date()
   const telemetry = {
     ip: resolvedIp,
@@ -57,29 +59,38 @@ export default defineEventHandler(async (event) => {
     lastSeenAt: now,
   }
 
-  await db.insert(serverTable)
+  const [server] = await db.insert(serverTable)
     .values({ licenseKeyId: license.id, ...telemetry })
-    .onConflictDoUpdate({ target: serverTable.licenseKeyId, set: telemetry })
+    .onConflictDoUpdate({ target: [serverTable.licenseKeyId, serverTable.ip], set: telemetry })
+    .returning()
 
-  // Decide licensing from the dashboard-controlled policy.
+  // Effective licensing: per-server override (if any) layered over the key's base policy.
+  const effectivePolicy = server.policyOverride ?? license.policy
+  const effectiveExpiresAt = server.overrideExpiresAt ?? license.expiresAt
+
   let licensed: boolean
-  switch (license.policy) {
-    case 'open':
-      licensed = true
-      break
-    case 'time':
-      licensed = license.status === 'active' && (!license.expiresAt || new Date(license.expiresAt) > now)
-      break
-    case 'key':
-    default:
-      licensed = license.status === 'active'
-      break
+  if (server.blocked) {
+    licensed = false
+  }
+  else {
+    switch (effectivePolicy) {
+      case 'open':
+        licensed = true
+        break
+      case 'time':
+        licensed = license.status === 'active' && (!effectiveExpiresAt || new Date(effectiveExpiresAt) > now)
+        break
+      case 'key':
+      default:
+        licensed = license.status === 'active'
+        break
+    }
   }
 
   return {
     licensed,
-    policy: license.policy,
-    expiresAt: license.expiresAt,
+    policy: effectivePolicy,
+    expiresAt: effectiveExpiresAt,
     message: '',
   }
 })
